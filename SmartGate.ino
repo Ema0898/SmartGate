@@ -3,11 +3,15 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 #include <EEPROM.h>
+#include <Wire.h>
+#include "tiny_code_reader.h"
 
 const char *ssidAP = "SmartGate";
 const char *passwordAP = "foobar123";
 
-const uint8_t INTERRUPT_PIN = D6;
+const uint8_t INTERRUPT_PIN = D5;
+const uint8_t I2C_SCL = D6;
+const uint8_t I2C_SDA = D7;
 
 IPAddress ip(192, 168, 1, 200);
 IPAddress gateway(192, 168, 1, 1);
@@ -74,7 +78,7 @@ bool sendHTTPRequest(const String& value)
   WiFiClient client;
   HTTPClient http;
 
-  String serverPath = "http://192.168.18.19:3000/barcode_check?id=" + value;
+  String serverPath = "http://192.168.18.204:3000/barcode_check?id=" + value;
 
   http.begin(client, serverPath.c_str());
   int httpResponseCode = http.PUT("");
@@ -87,9 +91,38 @@ bool sendHTTPRequest(const String& value)
   return httpResponseCode == HTTP_CODE_NO_CONTENT;
 }
 
+void checkQRCode()
+{
+
+  tiny_code_reader_results_t results = {};
+  // Perform a read action on the I2C address of the sensor to get the
+  // current face information detected.
+  if (!tiny_code_reader_read(&results))
+  {
+    Serial.println("No person sensor results found on the i2c bus");
+    return;
+  }
+
+  if (results.content_length == 0)
+  {
+    Serial.println("No code found");
+  }
+  else
+  {
+    Serial.print("Found '");
+    Serial.print((char*)results.content_bytes);
+    Serial.println("'\n");
+
+    bool ok = sendHTTPRequest((char*)results.content_bytes);
+    Serial.print("Ok = ");
+    Serial.println(ok);
+  }
+}
+
 void setup()
 {
   EEPROM.begin(512);
+  Wire.begin(I2C_SDA, I2C_SCL);
 
  	Serial.begin(115200);
 
@@ -164,9 +197,6 @@ void setup()
     }
 
     Serial.println(WiFi.status() == WL_CONNECTED ? "WIFI Connected" : "WIFI not Connected");
-    bool ok = sendHTTPRequest("hola");
-    Serial.print("Ok = ");
-    Serial.println(ok);
   }
 
   pinMode(INTERRUPT_PIN, INPUT_PULLUP);
@@ -178,6 +208,13 @@ void loop()
   if (!wifiNetworkConfigured)
   {
     server.handleClient();
+    delay(100);
+  }
+  else
+  {
+
+    checkQRCode();
+    delay(200);
   }
 
   if (doCleanEEPROM)
@@ -192,6 +229,5 @@ void loop()
   {
     ESP.reset();
   }
-
-  delay(100);
+  
 }
