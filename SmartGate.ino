@@ -9,7 +9,8 @@
 const char *ssidAP = "SmartGate";
 const char *passwordAP = "foobar123";
 
-const uint8_t INTERRUPT_PIN = D5;
+const uint8_t INTERRUPT_PIN = D4;
+const uint8_t RELAY_PIN = D5;
 const uint8_t I2C_SCL = D6;
 const uint8_t I2C_SDA = D7;
 
@@ -78,7 +79,7 @@ bool sendHTTPRequest(const String& value)
   WiFiClient client;
   HTTPClient http;
 
-  String serverPath = "http://192.168.18.204:3000/barcode_check?id=" + value;
+  String serverPath = "http://192.168.18.19:3000/barcode_check?id=" + value;
 
   http.begin(client, serverPath.c_str());
   int httpResponseCode = http.PUT("");
@@ -116,7 +117,19 @@ void checkQRCode()
     bool ok = sendHTTPRequest((char*)results.content_bytes);
     Serial.print("Ok = ");
     Serial.println(ok);
+
+    if (ok)
+    {
+      openGate();
+    }
   }
+}
+
+void openGate()
+{
+  digitalWrite(RELAY_PIN, HIGH);
+  delay(1000);
+  digitalWrite(RELAY_PIN, LOW);
 }
 
 void setup()
@@ -201,6 +214,8 @@ void setup()
 
   pinMode(INTERRUPT_PIN, INPUT_PULLUP);
   attachInterrupt(INTERRUPT_PIN, isr, FALLING);
+
+  pinMode(RELAY_PIN, OUTPUT);
 }
 
 void loop()
