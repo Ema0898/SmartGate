@@ -3,28 +3,37 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 #include <EEPROM.h>
-#include <Wire.h>
-#include "tiny_code_reader.h"
+#include <LiquidCrystal_I2C.h>
 
 const char *ssidAP = "SmartGate";
 const char *passwordAP = "foobar123";
 
 const uint8_t INTERRUPT_PIN = D4;
 const uint8_t RELAY_PIN = D5;
+const uint8_t ANALOG_PIN = A0;
 const uint8_t I2C_SCL = D6;
 const uint8_t I2C_SDA = D7;
+
+const int MAX_ANALOG_VALUE = 1024;
+const int TOLERANCE = 10;
+const int THESHOLDS[16] = { 200, 149, 90, 29, 370, 340, 298, 261, 484, 463, 437, 411, 565, 550, 532, 513 };
+const char KEYPAD_VALUES[16] = { '1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D' };
 
 IPAddress ip(192, 168, 1, 200);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
 ESP8266WebServer server(80);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 static const int EEPROM_CHECK_OFFSET = 0;
 static const int EEPROM_OFFSET = 1;
 bool doReset = false;
 bool doCleanEEPROM = false;
 bool wifiNetworkConfigured = false;
+
+int buffer_pointer = -1;
+char buffer[16];
 
 void ICACHE_RAM_ATTR isr()
 {
@@ -69,7 +78,7 @@ int readStringFromEEPROM(int addrOffset, String &strToRead)
   return addrOffset + 1 + newStrLen;
 }
 
-bool sendHTTPRequest(const String& value)
+bool sendHTTPRequest(const char* value)
 {
   if (WiFi.status() != WL_CONNECTED)
   {
@@ -79,7 +88,9 @@ bool sendHTTPRequest(const String& value)
   WiFiClient client;
   HTTPClient http;
 
-  String serverPath = "http://192.168.18.19:3000/barcode_check?id=" + value;
+  String serverPath = "http://192.168.18.204:3000/barcode_check?id=" + String(value);
+  Serial.print(serverPath);
+  Serial.print(":");
 
   http.begin(client, serverPath.c_str());
   int httpResponseCode = http.PUT("");
@@ -92,36 +103,56 @@ bool sendHTTPRequest(const String& value)
   return httpResponseCode == HTTP_CODE_NO_CONTENT;
 }
 
-void checkQRCode()
+void checkKeyPad()
 {
+  int adcValue = analogRead(ANALOG_PIN); /* Read the Analog Input value */
 
-  tiny_code_reader_results_t results = {};
-  // Perform a read action on the I2C address of the sensor to get the
-  // current face information detected.
-  if (!tiny_code_reader_read(&results))
+  if (adcValue == MAX_ANALOG_VALUE)
   {
-    Serial.println("No person sensor results found on the i2c bus");
     return;
   }
 
-  if (results.content_length == 0)
+  for (int i = 0; i < 16; ++i)
   {
-    Serial.println("No code found");
+    if (abs(adcValue - THESHOLDS[i]) < TOLERANCE)
+    {
+      updateBuffer(KEYPAD_VALUES[i]);
+
+      while (analogRead(ANALOG_PIN) < 1000)
+      {
+        delay (100);
+      }
+    }
+  }
+}
+
+void updateBuffer(const char key)
+{
+  if (key == '*')
+  {
+    // We need to add 2 for the null termination and because buffer pointer starts at 0
+    char subBuffer[buffer_pointer + 2];
+    memcpy(subBuffer, buffer, (buffer_pointer + 1) * sizeof(char));
+    subBuffer[buffer_pointer + 1] = '\0';
+    sendHTTPRequest(subBuffer);
+
+    buffer_pointer = -1;
+    memset(buffer, 0, 16 * sizeof(char));
+    lcd.clear();
   }
   else
   {
-    Serial.print("Found '");
-    Serial.print((char*)results.content_bytes);
-    Serial.println("'\n");
+    buffer_pointer++;
+    buffer[buffer_pointer] = key;
+  }
+}
 
-    bool ok = sendHTTPRequest((char*)results.content_bytes);
-    Serial.print("Ok = ");
-    Serial.println(ok);
-
-    if (ok)
-    {
-      openGate();
-    }
+void displayKeys()
+{
+  if (buffer_pointer > -1)
+  {
+    lcd.setCursor(buffer_pointer, 0); // move cursor to (column_cursor, 0)
+    lcd.print(buffer[buffer_pointer]);
   }
 }
 
@@ -135,7 +166,12 @@ void openGate()
 void setup()
 {
   EEPROM.begin(512);
-  Wire.begin(I2C_SDA, I2C_SCL);
+
+  lcd.init(); // Initialize the LCD I2C display
+  lcd.backlight();
+  lcd.clear();
+
+  memset(buffer, 0, 16 * sizeof(char));
 
  	Serial.begin(115200);
 
@@ -227,9 +263,9 @@ void loop()
   }
   else
   {
-
-    checkQRCode();
-    delay(200);
+    checkKeyPad();
+    displayKeys();
+    delay(100);
   }
 
   if (doCleanEEPROM)
