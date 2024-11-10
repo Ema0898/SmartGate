@@ -11,8 +11,6 @@ const char *passwordAP = "foobar123";
 const uint8_t INTERRUPT_PIN = D4;
 const uint8_t RELAY_PIN = D5;
 const uint8_t ANALOG_PIN = A0;
-const uint8_t I2C_SCL = D6;
-const uint8_t I2C_SDA = D7;
 
 const int MAX_ANALOG_VALUE = 1024;
 const int TOLERANCE = 10;
@@ -88,7 +86,7 @@ bool sendHTTPRequest(const char* value)
   WiFiClient client;
   HTTPClient http;
 
-  String serverPath = "http://192.168.18.204:3000/barcode_check?id=" + String(value);
+  String serverPath = "http://192.168.18.19:3000/barcode_check?id=" + String(value);
   Serial.print(serverPath);
   Serial.print(":");
 
@@ -126,6 +124,12 @@ void checkKeyPad()
   }
 }
 
+void resetBuffer()
+{
+  buffer_pointer = -1;
+  memset(buffer, 0, 16 * sizeof(char));
+}
+
 void updateBuffer(const char key)
 {
   if (key == '*')
@@ -134,11 +138,19 @@ void updateBuffer(const char key)
     char subBuffer[buffer_pointer + 2];
     memcpy(subBuffer, buffer, (buffer_pointer + 1) * sizeof(char));
     subBuffer[buffer_pointer + 1] = '\0';
-    sendHTTPRequest(subBuffer);
 
-    buffer_pointer = -1;
-    memset(buffer, 0, 16 * sizeof(char));
-    lcd.clear();
+    bool success = sendHTTPRequest(subBuffer);
+    if (success)
+    {
+      changeGateState(true);
+    }
+
+    resetBuffer();
+
+    displayResultMessage(success);
+    Serial.println(buffer_pointer);
+
+    changeGateState(false);
   }
   else
   {
@@ -151,16 +163,40 @@ void displayKeys()
 {
   if (buffer_pointer > -1)
   {
-    lcd.setCursor(buffer_pointer, 0); // move cursor to (column_cursor, 0)
+    lcd.setCursor(buffer_pointer, 1);
     lcd.print(buffer[buffer_pointer]);
   }
 }
 
-void openGate()
+void changeGateState(bool open)
 {
-  digitalWrite(RELAY_PIN, HIGH);
-  delay(1000);
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, open ? HIGH : LOW);
+}
+
+void displayResultMessage(bool success)
+{
+  lcd.clear();
+  lcd.noBlink();
+  lcd.setCursor(0, 0);
+  lcd.print(success ? "Accepted" : "Access Denied");
+
+  if (success)
+  {
+    lcd.setCursor(0, 1);
+    lcd.print("Gate is now open");
+  }
+
+  delay(5000);
+  lcdEnterPasswordState();
+}
+
+void lcdEnterPasswordState()
+{
+  lcd.clear();
+  lcd.blink();
+  lcd.setCursor(0, 0);
+  lcd.print("Enter Password");
+  lcd.setCursor(0, 1);
 }
 
 void setup()
@@ -224,6 +260,9 @@ void setup()
 
     server.begin();
     Serial.println("HTTP server started");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Setup Mode");
   }
   else
   {
@@ -246,12 +285,14 @@ void setup()
     }
 
     Serial.println(WiFi.status() == WL_CONNECTED ? "WIFI Connected" : "WIFI not Connected");
+    lcdEnterPasswordState();
   }
 
   pinMode(INTERRUPT_PIN, INPUT_PULLUP);
   attachInterrupt(INTERRUPT_PIN, isr, FALLING);
 
   pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);
 }
 
 void loop()
