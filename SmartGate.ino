@@ -4,25 +4,38 @@
 #include <WiFiClient.h>
 #include <EEPROM.h>
 #include <LiquidCrystal_I2C.h>
+#include <Keypad_I2C.h>
 
 const char *ssidAP = "SmartGate";
 const char *passwordAP = "foobar123";
 
+const uint8_t KEY_PAD_I2C_ADDRESS = 0x20;
+const uint8_t LCD_I2C_ADDRESS = 0x27;
+
 const uint8_t INTERRUPT_PIN = D4;
 const uint8_t RELAY_PIN = D5;
-const uint8_t ANALOG_PIN = A0;
 
-const int MAX_ANALOG_VALUE = 1024;
-const int TOLERANCE = 10;
-const int THESHOLDS[16] = { 200, 149, 90, 29, 370, 340, 298, 261, 484, 463, 437, 411, 565, 550, 532, 513 };
-const char KEYPAD_VALUES[16] = { '1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D' };
+const uint8_t KEY_PAD_ROWS = 4;
+const uint8_t KEY_PAD_COLUMNS = 4;
+
+byte KEY_PAD_ROW_PINS[KEY_PAD_ROWS] = { 0, 1, 2, 3 };
+byte KEY_PAD_COLUMN_PINS[KEY_PAD_COLUMNS] = { 4, 5, 6, 7 };
+
+const char KEY_PAD_VALUES[KEY_PAD_ROWS][KEY_PAD_COLUMNS] =
+{
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
 
 IPAddress ip(192, 168, 1, 200);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
 ESP8266WebServer server(80);
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal_I2C lcd(LCD_I2C_ADDRESS, 16, 2);
+Keypad_I2C keypad = Keypad_I2C(makeKeymap(KEY_PAD_VALUES), KEY_PAD_ROW_PINS, KEY_PAD_COLUMN_PINS, KEY_PAD_ROWS, KEY_PAD_COLUMNS, KEY_PAD_I2C_ADDRESS);
 
 static const int EEPROM_CHECK_OFFSET = 0;
 static const int EEPROM_OFFSET = 1;
@@ -87,8 +100,7 @@ bool sendHTTPRequest(const char* value)
   HTTPClient http;
 
   String serverPath = "http://192.168.18.19:3000/barcode_check?id=" + String(value);
-  Serial.print(serverPath);
-  Serial.print(":");
+  Serial.println(serverPath);
 
   http.begin(client, serverPath.c_str());
   int httpResponseCode = http.PUT("");
@@ -103,24 +115,10 @@ bool sendHTTPRequest(const char* value)
 
 void checkKeyPad()
 {
-  int adcValue = analogRead(ANALOG_PIN); /* Read the Analog Input value */
-
-  if (adcValue == MAX_ANALOG_VALUE)
+  const char key = keypad.getKey();
+  if (key)
   {
-    return;
-  }
-
-  for (int i = 0; i < 16; ++i)
-  {
-    if (abs(adcValue - THESHOLDS[i]) < TOLERANCE)
-    {
-      updateBuffer(KEYPAD_VALUES[i]);
-
-      while (analogRead(ANALOG_PIN) < 1000)
-      {
-        delay (100);
-      }
-    }
+    updateBuffer(key);
   }
 }
 
@@ -146,10 +144,7 @@ void updateBuffer(const char key)
     }
 
     resetBuffer();
-
     displayResultMessage(success);
-    Serial.println(buffer_pointer);
-
     changeGateState(false);
   }
   else
@@ -285,6 +280,7 @@ void setup()
     }
 
     Serial.println(WiFi.status() == WL_CONNECTED ? "WIFI Connected" : "WIFI not Connected");
+    keypad.begin();
     lcdEnterPasswordState();
   }
 
