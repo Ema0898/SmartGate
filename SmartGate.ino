@@ -12,7 +12,7 @@ const char *passwordAP = "foobar123";
 const uint8_t KEY_PAD_I2C_ADDRESS = 0x20;
 const uint8_t LCD_I2C_ADDRESS = 0x27;
 
-const uint8_t INTERRUPT_PIN = D4;
+const uint8_t INTERRUPT_PIN = D3;
 const uint8_t RELAY_PIN = D5;
 
 const uint8_t KEY_PAD_ROWS = 4;
@@ -40,16 +40,10 @@ Keypad_I2C keypad = Keypad_I2C(makeKeymap(KEY_PAD_VALUES), KEY_PAD_ROW_PINS, KEY
 static const int EEPROM_CHECK_OFFSET = 0;
 static const int EEPROM_OFFSET = 1;
 bool doReset = false;
-bool doCleanEEPROM = false;
 bool wifiNetworkConfigured = false;
 
 int buffer_pointer = -1;
 char buffer[16];
-
-void ICACHE_RAM_ATTR isr()
-{
-  doCleanEEPROM = true;
-}
 
 void writeBoolToEEPROM(int addrOffset, const bool boolToWrite)
 {
@@ -285,7 +279,6 @@ void setup()
   }
 
   pinMode(INTERRUPT_PIN, INPUT_PULLUP);
-  attachInterrupt(INTERRUPT_PIN, isr, FALLING);
 
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
@@ -305,7 +298,7 @@ void loop()
     delay(100);
   }
 
-  if (doCleanEEPROM)
+  if (digitalRead(INTERRUPT_PIN) == LOW)
   {
     writeBoolToEEPROM(EEPROM_CHECK_OFFSET, false);
     EEPROM.commit();
